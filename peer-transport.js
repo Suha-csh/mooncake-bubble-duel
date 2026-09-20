@@ -6,7 +6,7 @@
 
   function freshRoom() {
     return {
-      version: 5,
+      version: 6,
       phase: "lobby",
       players: [null, null],
       presence: {},
@@ -15,6 +15,7 @@
       seed: 0,
       scores: [0, 0],
       snapshots: [null, null],
+      frozen: [false, false],
       winner: null,
       loser: null,
       endReason: null,
@@ -26,6 +27,7 @@
   function cleanRoom(state) {
     const now = Date.now();
     state.presence ||= {};
+    state.frozen = Array.isArray(state.frozen) ? [Boolean(state.frozen[0]), Boolean(state.frozen[1])] : [false, false];
     for (const [id, presence] of Object.entries(state.presence)) {
       if (!presence || now - Number(presence.lastSeen || 0) > STALE_MS) delete state.presence[id];
     }
@@ -43,7 +45,7 @@
       shiftedRows: Math.max(0, Math.min(5, Number(value.shiftedRows) || 0)),
       balls: value.balls.map((ball) => ({
         row: Math.max(0, Math.min(16, Number(ball.row) || 0)),
-        col: Math.max(0, Math.min(15, Number(ball.col) || 0)),
+        col: Math.max(0, Math.min(16, Number(ball.col) || 0)),
         type: Math.max(0, Math.min(5, Number(ball.type) || 0))
       })),
       queue: Array.isArray(value.queue)
@@ -57,7 +59,7 @@
         type: Math.max(0, Math.min(5, Number(value.shot.type) || 0))
       } : null,
       aim: Number(value.aim) || -Math.PI / 2,
-      overflowed: Boolean(value.overflowed),
+      frozen: Boolean(value.frozen),
       updatedAt: Date.now()
     };
   }
@@ -82,6 +84,7 @@
         state.endReason = null;
         state.scores = [0, 0];
         state.snapshots = [null, null];
+        state.frozen = [false, false];
         state.players = state.players.map((player) => player ? { ...player, ready: false } : null);
         existing = state.players.findIndex((player) => player?.id === clientId);
       }
@@ -106,6 +109,7 @@
         state.seed = crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
         state.scores = [0, 0];
         state.snapshots = [null, null];
+        state.frozen = [false, false];
         state.winner = null;
         state.loser = null;
         state.endReason = null;
@@ -113,26 +117,17 @@
     } else if (action === "snapshot" && state.phase === "playing") {
       const slot = state.players.findIndex((player) => player?.id === clientId);
       const snapshot = safeSnapshot(body.snapshot, state.roundId);
-      if (slot >= 0 && snapshot) {
+      if (slot >= 0 && snapshot && !state.frozen[slot]) {
         state.snapshots[slot] = snapshot;
         state.scores[slot] = snapshot.score;
       }
-    } else if (action === "overflow" && state.phase === "playing") {
+    } else if (action === "freeze" && state.phase === "playing") {
       const slot = state.players.findIndex((player) => player?.id === clientId);
       const snapshot = safeSnapshot(body.snapshot, state.roundId);
-      if (slot >= 0 && now >= Number(state.startedAt || now)) {
-        if (snapshot) {
-          state.snapshots[slot] = snapshot;
-          state.scores[slot] = snapshot.score;
-        }
-        state.phase = "finished";
-        state.scores = [
-          state.snapshots?.[0]?.score || state.scores[0] || 0,
-          state.snapshots?.[1]?.score || state.scores[1] || 0
-        ];
-        state.loser = slot;
-        state.winner = slot === 0 ? 1 : 0;
-        state.endReason = "overflow";
+      if (slot >= 0 && snapshot && !state.frozen[slot] && now >= Number(state.startedAt || now)) {
+        state.snapshots[slot] = snapshot;
+        state.scores[slot] = snapshot.score;
+        state.frozen[slot] = true;
       }
     } else if (action === "finish" && state.phase === "playing") {
       if (now - Number(state.startedAt || now) >= ROUND_MS - 250) {
@@ -162,7 +157,7 @@
       this.clientId = clientId;
       this.onState = onState;
       this.onStatus = onStatus;
-      this.hostId = `moon-rabbit-v5-${roomCode.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+      this.hostId = `moon-rabbit-v6-${roomCode.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
       this.latest = freshRoom();
       this.hostState = this.latest;
       this.peer = null;
@@ -295,7 +290,7 @@
     }
 
     receive(message) {
-      if (message?.kind !== "state" || message.state?.version !== 5) return;
+      if (message?.kind !== "state" || message.state?.version !== 6) return;
       if (Number(message.state.revision || 0) >= Number(this.latest.revision || 0)) {
         this.latest = message.state;
         this.emitState();

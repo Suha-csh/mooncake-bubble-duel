@@ -8,10 +8,10 @@
   const ROUND_SECONDS = 60;
   const STALE_MS = 9000;
   const INITIAL_ROWS = 5;
-  const BALL_SIZE = 38;
+  const BALL_SIZE = 31;
   const COLORS = ["#e7aa45", "#d96757", "#789b4f", "#8a5598", "#ef9d32", "#70402d"];
   const sprite = new Image();
-  sprite.src = "./assets/mooncake-rabbits.png?v=air1";
+  sprite.src = "./assets/mooncake-rabbits.png?v=air2";
   const clientId = sessionStorage.getItem(clientStorageKey) || `${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
   sessionStorage.setItem(clientStorageKey, clientId);
 
@@ -37,7 +37,7 @@
 
   function makeRoom() {
     return {
-      version: 5,
+      version: 6,
       phase: "lobby",
       players: [null, null],
       presence: {},
@@ -46,6 +46,7 @@
       seed: 0,
       scores: [0, 0],
       snapshots: [null, null],
+      frozen: [false, false],
       winner: null,
       loser: null,
       endReason: null,
@@ -57,7 +58,7 @@
   async function serverAction(action, payload = {}, options = {}) {
     try {
       const next = await roomTransport?.action(action, payload, { immediate: options.keepalive === true });
-      if (next?.version === 5 && next.revision >= room.revision) {
+      if (next?.version === 6 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -71,7 +72,7 @@
   async function refreshRoom() {
     try {
       const next = roomTransport?.current();
-      if (next?.version === 5 && next.revision >= room.revision) {
+      if (next?.version === 6 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -118,12 +119,12 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext("2d");
       this.slot = slot;
-      this.radius = 18;
-      this.pitch = 40;
-      this.rowHeight = 33;
-      this.top = 23;
+      this.radius = 15;
+      this.pitch = 34;
+      this.rowHeight = 25;
+      this.top = 20;
       this.fitCanvas();
-      this.shooter = { x: this.canvas.width / 2, y: this.canvas.height - 50 };
+      this.shooter = { x: this.canvas.width / 2, y: this.canvas.height - 36 };
       this.aim = -Math.PI / 2;
       this.balls = [];
       this.queue = [0, 1, 2, 3];
@@ -131,7 +132,7 @@
       this.particles = [];
       this.score = 0;
       this.shiftedRows = 0;
-      this.overflowed = false;
+      this.frozen = false;
       this.roundId = null;
       this.rng = Math.random;
       this.canvas.addEventListener("pointermove", (event) => this.point(event, false));
@@ -147,12 +148,13 @@
       if (this.canvas.height !== nextHeight) this.canvas.height = nextHeight;
       if (this.shooter) {
         this.shooter.x = this.canvas.width / 2;
-        this.shooter.y = this.canvas.height - 50;
+        this.shooter.y = this.canvas.height - 36;
       }
     }
 
     reset(seed, roundId) {
       this.rng = hashSeed(seed, this.slot);
+      this.seed = seed;
       this.roundId = roundId;
       this.balls = [];
       for (let row = 0; row < INITIAL_ROWS; row++) {
@@ -167,17 +169,17 @@
       this.particles = [];
       this.score = 0;
       this.shiftedRows = 0;
-      this.overflowed = false;
+      this.frozen = false;
       this.aim = -Math.PI / 2;
     }
 
     nextType() { return Math.floor(this.rng() * 6); }
-    cols(row) { return row % 2 ? 13 : 14; }
-    coord(row, col) { return { x: 39 + col * this.pitch + (row % 2 ? 20 : 0), y: this.top + row * this.rowHeight }; }
+    cols(row) { return row % 2 ? 16 : 17; }
+    coord(row, col) { return { x: 28 + col * this.pitch + (row % 2 ? 17 : 0), y: this.top + row * this.rowHeight }; }
     key(row, col) { return `${row}:${col}`; }
 
     point(event, shouldShoot) {
-      if (currentRole !== this.slot || room.phase !== "playing" || Date.now() < room.startedAt) return;
+      if (currentRole !== this.slot || room.phase !== "playing" || this.frozen || Date.now() < room.startedAt) return;
       const rect = this.canvas.getBoundingClientRect();
       const x = (event.clientX - rect.left) * this.canvas.width / rect.width;
       const y = (event.clientY - rect.top) * this.canvas.height / rect.height;
@@ -194,7 +196,7 @@
       if (this.shot) return;
       const speed = 520;
       this.shot = {
-        x: this.shooter.x, y: this.shooter.y - 23,
+        x: this.shooter.x, y: this.shooter.y - 18,
         vx: Math.cos(this.aim) * speed, vy: Math.sin(this.aim) * speed,
         type: this.queue.shift()
       };
@@ -202,13 +204,23 @@
       sound("shoot");
     }
 
-    update(dt, elapsed) {
+    syncRows(elapsed) {
+      if (this.frozen) return false;
       const expectedShifts = Math.floor(elapsed / 10);
       while (this.shiftedRows < expectedShifts && this.shiftedRows < 5) {
-        this.addRow();
-        this.shiftedRows++;
+        const shiftNumber = this.shiftedRows + 1;
+        this.addRow(shiftNumber);
+        this.shiftedRows = shiftNumber;
       }
+      if (this.isOverDangerLine()) {
+        this.frozen = true;
+        return true;
+      }
+      return false;
+    }
 
+    update(dt) {
+      if (this.frozen) return false;
       if (this.shot) {
         const shot = this.shot;
         shot.x += shot.vx * dt;
@@ -232,8 +244,8 @@
         particle.alpha -= dt * .8;
       });
       this.particles = this.particles.filter((particle) => particle.alpha > 0 && particle.y < this.canvas.height + 120);
-      if (!this.overflowed && this.isOverDangerLine()) {
-        this.overflowed = true;
+      if (this.isOverDangerLine()) {
+        this.frozen = true;
         return true;
       }
       return false;
@@ -252,9 +264,10 @@
       return this.balls.some((ball) => this.coord(ball.row, ball.col).y + this.radius >= limit);
     }
 
-    addRow() {
+    addRow(shiftNumber) {
       this.balls.forEach((ball) => { ball.row += 1; });
-      for (let col = 0; col < this.cols(0); col++) this.balls.push({ row: 0, col, type: this.nextType() });
+      const rowRng = hashSeed((this.seed ^ Math.imul(shiftNumber, 0x45d9f3b)) >>> 0, this.slot + 8);
+      for (let col = 0; col < this.cols(0); col++) this.balls.push({ row: 0, col, type: Math.floor(rowRng() * 6) });
     }
 
     landShot() {
@@ -337,7 +350,7 @@
         roundId: this.roundId, score: this.score, shiftedRows: this.shiftedRows,
         balls: this.balls.map((ball) => ({ row: ball.row, col: ball.col, type: ball.type })),
         queue: [...this.queue], shot: this.shot ? { ...this.shot } : null,
-        aim: this.aim, overflowed: this.overflowed, updatedAt: Date.now()
+        aim: this.aim, frozen: this.frozen, updatedAt: Date.now()
       };
     }
 
@@ -350,7 +363,7 @@
       this.queue = snapshot.queue || this.queue;
       this.shot = snapshot.shot || null;
       this.aim = snapshot.aim ?? this.aim;
-      this.overflowed = Boolean(snapshot.overflowed);
+      this.frozen = Boolean(snapshot.frozen);
     }
 
     drawSprite(type, x, y, size, rotation = 0, alpha = 1) {
@@ -373,7 +386,7 @@
       const sh = sprite.naturalHeight / 2;
       const sx = (this.slot === 0 ? 2 : 3) * sw;
       ctx.save(); ctx.globalAlpha = .94;
-      ctx.drawImage(sprite, sx, sh, sw, sh, 175, this.canvas.height - 94, 84, 84);
+      ctx.drawImage(sprite, sx, sh, sw, sh, 200, this.canvas.height - 72, 62, 62);
       ctx.restore();
     }
 
@@ -382,35 +395,35 @@
       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
       ctx.save();
       ctx.strokeStyle = "rgba(255,230,176,.06)"; ctx.lineWidth = 1;
-      for (let x = 24; x < this.canvas.width; x += 44) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,this.canvas.height - 95); ctx.stroke(); }
+      for (let x = 24; x < this.canvas.width; x += 44) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,this.canvas.height - 76); ctx.stroke(); }
       ctx.restore();
 
       this.balls.forEach((ball) => {
         const p = this.coord(ball.row, ball.col);
         this.drawSprite(ball.type, p.x, p.y, BALL_SIZE);
       });
-      this.particles.forEach((particle) => this.drawSprite(particle.type, particle.x, particle.y, 36, particle.rotation, Math.max(0, particle.alpha)));
+      this.particles.forEach((particle) => this.drawSprite(particle.type, particle.x, particle.y, 29, particle.rotation, Math.max(0, particle.alpha)));
       if (this.shot) this.drawSprite(this.shot.type, this.shot.x, this.shot.y, BALL_SIZE);
 
       const sx = this.shooter.x, sy = this.shooter.y;
-      const lineLength = 112;
+      const lineLength = 94;
       const ex = sx + Math.cos(this.aim) * lineLength;
       const ey = sy + Math.sin(this.aim) * lineLength;
       ctx.save();
       ctx.setLineDash([3, 9]); ctx.lineCap = "round"; ctx.strokeStyle = "rgba(255,231,176,.58)"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(sx, sy - 20); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx, sy - 15); ctx.lineTo(ex, ey); ctx.stroke();
       ctx.setLineDash([]); ctx.translate(sx, sy); ctx.rotate(this.aim + Math.PI / 2);
-      const gradient = ctx.createLinearGradient(-8,-34,8,10); gradient.addColorStop(0,"#f2b84e"); gradient.addColorStop(1,"#713623");
+      const gradient = ctx.createLinearGradient(-7,-29,7,8); gradient.addColorStop(0,"#f2b84e"); gradient.addColorStop(1,"#713623");
       ctx.fillStyle = gradient; ctx.strokeStyle = "#ffdc8b"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.roundRect(-9,-39,18,42,8); ctx.fill(); ctx.stroke(); ctx.restore();
-      this.drawSprite(this.queue[0], sx, sy - 26, BALL_SIZE);
+      ctx.beginPath(); ctx.roundRect(-7,-32,14,35,7); ctx.fill(); ctx.stroke(); ctx.restore();
+      this.drawSprite(this.queue[0], sx, sy - 21, BALL_SIZE);
       this.drawRabbit();
 
       ctx.save(); ctx.fillStyle = "rgba(255,255,255,.05)"; ctx.strokeStyle = "rgba(255,220,150,.15)";
-      const queueTop = this.canvas.height - 89;
-      ctx.beginPath(); ctx.roundRect(380, queueTop, 210, 79, 17); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "rgba(255,225,170,.72)"; ctx.font = "600 10px system-ui"; ctx.fillText("随后登场", 394, queueTop + 17);
-      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 427 + (index - 1) * 60, queueTop + 49, 35));
+      const queueTop = this.canvas.height - 70;
+      ctx.beginPath(); ctx.roundRect(415, queueTop, 175, 60, 15); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(255,225,170,.72)"; ctx.font = "600 9px system-ui"; ctx.fillText("随后登场", 427, queueTop + 14);
+      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 448 + (index - 1) * 50, queueTop + 39, 27));
       ctx.restore();
     }
   }
@@ -439,14 +452,21 @@
       el(`playerName${slot}`).textContent = player?.name || "等待加入";
       const statusEl = el(`playerStatus${slot}`);
       const online = player && Boolean(room.presence?.[player.id]);
-      statusEl.textContent = player ? (room.phase === "playing" ? (online ? "对战中" : "已离线") : (player.ready ? "已准备" : "未准备")) : "未准备";
+      const frozen = room.phase === "playing" && Boolean(room.frozen?.[slot]);
+      statusEl.textContent = player ? (room.phase === "playing" ? (frozen ? "已触线 · 暂停" : (online ? "对战中" : "已离线")) : (player.ready ? "已准备" : "未准备")) : "未准备";
       statusEl.parentElement.classList.toggle("ready", Boolean(player?.ready && (room.phase !== "playing" || online)));
+      statusEl.parentElement.classList.toggle("paused", frozen);
       el(`score${slot}`).textContent = String(room.scores?.[slot] || 0);
       el(`playerPanel${slot}`).classList.toggle("is-local", currentRole === slot);
       const lock = el(`lock${slot}`);
       const showBoard = player && (room.phase === "playing" || room.phase === "finished");
-      lock.classList.toggle("hidden", Boolean(showBoard));
-      if (!showBoard) {
+      lock.classList.toggle("hidden", Boolean(showBoard && !frozen));
+      lock.classList.toggle("is-frozen", frozen);
+      lock.querySelector(".lock-moon").textContent = frozen ? "Ⅱ" : "☾";
+      if (frozen) {
+        lock.querySelector("strong").textContent = "已触线，棋盘暂停";
+        lock.querySelector("small").textContent = "倒计时继续，结束后按双方得分结算";
+      } else if (!showBoard) {
         lock.querySelector("strong").textContent = player ? (player.ready ? "已准备，等待对手" : "等待准备") : "等待选手";
         lock.querySelector("small").textContent = player ? "两位选手都准备后，倒计时自动开始" : "点击下方“加入并准备”占领席位";
       }
@@ -457,19 +477,16 @@
       ui.roomHint.textContent = "前两位点击准备的玩家进入比赛，其他人自动观战";
       ui.timer.textContent = "01:00"; ui.clockProgress.style.width = "100%";
     } else if (room.phase === "playing") {
-      ui.phaseLabel.textContent = "擂台对战中";
-      ui.roomHint.textContent = currentRole < 0 ? "观战模式 · 棋盘状态实时同步" : "瞄准棋盘并点击，连接三枚同口味月饼";
+      const frozenSlots = [0, 1].filter((slot) => room.frozen?.[slot]);
+      ui.phaseLabel.textContent = frozenSlots.length ? "触线暂停中" : "擂台对战中";
+      ui.roomHint.textContent = frozenSlots.length
+        ? `选手 ${frozenSlots.map((slot) => slot + 1).join("、")} 已暂停 · 倒计时继续，结束后按得分结算`
+        : (currentRole < 0 ? "观战模式 · 棋盘状态实时同步" : "瞄准棋盘并点击，连接三枚同口味月饼");
     } else {
-      if (room.endReason === "overflow" && Number.isInteger(room.loser)) {
-        ui.phaseLabel.textContent = `选手 ${room.loser + 1} 月饼越线`;
-        ui.roomHint.textContent = `选手 ${room.winner + 1} 获胜 · 最终比分 ${room.scores[0]} : ${room.scores[1]}`;
-        ui.timer.textContent = "结束";
-      } else {
-        const winnerText = room.winner === -1 ? "本局平局" : `选手 ${room.winner + 1} 获胜`;
-        ui.phaseLabel.textContent = winnerText;
-        ui.roomHint.textContent = `最终比分 ${room.scores[0]} : ${room.scores[1]}`;
-        ui.timer.textContent = "00:00";
-      }
+      const winnerText = room.winner === -1 ? "本局平局" : `选手 ${room.winner + 1} 获胜`;
+      ui.phaseLabel.textContent = winnerText;
+      ui.roomHint.textContent = `最终比分 ${room.scores[0]} : ${room.scores[1]}`;
+      ui.timer.textContent = "00:00";
       ui.clockProgress.style.width = "0%";
     }
 
@@ -477,7 +494,7 @@
       const player = room.players[currentRole];
       ui.roleLabel.textContent = `选手 ${currentRole + 1} · ${currentRole ? "白兔" : "黑兔"}`;
       ui.roleAvatar.textContent = "";
-      ui.roleAvatar.style.backgroundImage = "url('./assets/mooncake-rabbits.png?v=air1')";
+      ui.roleAvatar.style.backgroundImage = "url('./assets/mooncake-rabbits.png?v=air2')";
       ui.roleAvatar.style.backgroundSize = "400% 200%";
       ui.roleAvatar.style.backgroundPosition = currentRole ? "100% 100%" : "66.666% 100%";
       if (room.phase === "lobby") {
@@ -487,8 +504,9 @@
         ui.dockMessage.textContent = player.ready ? "已就位，等待另一位选手" : "准备后请等待另一位选手";
       } else if (room.phase === "playing") {
         ui.readyButton.disabled = true; ui.readyButton.classList.remove("is-ready");
-        ui.readyButton.querySelector("span").textContent = "比赛进行中";
-        ui.dockMessage.textContent = "移动指针瞄准，点击发射月饼";
+        const frozen = Boolean(room.frozen?.[currentRole]);
+        ui.readyButton.querySelector("span").textContent = frozen ? "等待结算" : "比赛进行中";
+        ui.dockMessage.textContent = frozen ? "棋盘已暂停，倒计时结束后按得分结算" : "移动指针瞄准，点击发射月饼";
       } else {
         ui.readyButton.disabled = false; ui.readyButton.classList.remove("is-ready");
         ui.readyButton.querySelector("span").textContent = "再来一局";
@@ -505,24 +523,26 @@
     }
 
     games.forEach((game, slot) => {
-      if (room.phase === "playing" && room.roundId && game.roundId !== room.roundId && currentRole === slot) game.reset(room.seed, room.roundId);
+      if (room.phase === "playing" && room.roundId && game.roundId !== room.roundId) game.reset(room.seed, room.roundId);
       if (slot !== currentRole) game.applySnapshot(room.snapshots?.[slot]);
+      if (room.phase === "playing" && room.frozen?.[slot]) game.frozen = true;
     });
   }
 
-  async function finishRound(loser = null) {
+  async function freezeBoard(slot) {
     if (room.phase !== "playing") return;
-    const overflow = Number.isInteger(loser);
-    const payload = overflow ? { snapshot: games[loser].snapshot() } : {};
-    const next = await serverAction(overflow ? "overflow" : "finish", payload, { silent: true });
-    if (next?.phase === "finished") {
-      sound("end");
-      if (overflow) announce("月饼越过警戒线，本局结束");
-    }
+    const next = await serverAction("freeze", { snapshot: games[slot].snapshot() }, { silent: true });
+    if (next?.frozen?.[slot]) announce("月饼触线，棋盘暂停；倒计时结束后按得分结算");
+  }
+
+  async function finishRound() {
+    if (room.phase !== "playing") return;
+    const next = await serverAction("finish", {}, { silent: true });
+    if (next?.phase === "finished") sound("end");
   }
 
   function publishGame(now) {
-    if (currentRole < 0 || room.phase !== "playing" || now - lastPublished < 220) return;
+    if (currentRole < 0 || room.phase !== "playing" || games[currentRole].frozen || now - lastPublished < 220) return;
     lastPublished = now;
     const snapshot = games[currentRole].snapshot();
     serverAction("snapshot", { snapshot }, { silent: true });
@@ -538,13 +558,15 @@
       ui.timer.textContent = `${Math.floor(shown / 60).toString().padStart(2,"0")}:${(shown % 60).toString().padStart(2,"0")}`;
       ui.clockProgress.style.width = `${left / ROUND_SECONDS * 100}%`;
       const untilShift = 10 - (Math.floor(elapsed) % 10);
-      [0,1].forEach((slot) => el(`shift${slot}`).textContent = `${untilShift} 秒后月饼下移`);
+      [0,1].forEach((slot) => {
+        const frozen = room.frozen?.[slot] || games[slot].frozen;
+        el(`shift${slot}`).textContent = frozen ? "已触线 · 棋盘暂停" : `${untilShift} 秒后月饼下移`;
+        const crossed = elapsed > 0 && left > 0 ? games[slot].syncRows(elapsed) : false;
+        if (crossed && slot === currentRole) freezeBoard(slot);
+      });
       if (currentRole >= 0 && elapsed > 0 && left > 0) {
-        const overflowed = games[currentRole].update(dt, elapsed);
-        if (overflowed && !finishRequested) {
-          finishRequested = true;
-          finishRound(currentRole);
-        }
+        const crossed = games[currentRole].update(dt);
+        if (crossed) freezeBoard(currentRole);
       }
       publishGame(now);
       if (left <= 0 && !finishRequested) { finishRequested = true; finishRound(); }
@@ -601,7 +623,7 @@
     roomCode,
     clientId,
     onState(next) {
-      if (next?.version === 5 && next.revision >= room.revision) {
+      if (next?.version === 6 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
