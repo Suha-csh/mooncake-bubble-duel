@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <meta name="theme-color" content="#120b2d" />
+    <meta name="description" content="双人月饼泡泡龙对战：准备入场、限时一分钟、实时计分与观战模式。" />
+    <title>月兔泡泡擂台</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%23f2ad49' stroke='%23753526' stroke-width='4'/%3E%3Cpath d='M18 32c8-2 9-12 14-15 5 3 6 13 14 15-8 2-9 12-14 15-5-3-6-13-14-15Z' fill='none' stroke='%23753526' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23753526'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="sky" aria-hidden="true"><span></span><span></span><span></span></div>
+
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">月</div>
+          <div>
+            <h1>月兔泡泡擂台</h1>
+            <p>中秋限定 · 双人竞速</p>
+          </div>
+        </div>
+
+        <div class="match-clock" aria-live="polite">
+          <span class="clock-label">本局剩余</span>
+          <strong id="timer">01:00</strong>
+          <span class="clock-track"><i id="clockProgress"></i></span>
+        </div>
+
+        <div class="room-tools">
+          <div class="room-code"><span>房间</span><strong id="roomCode">MOON-082</strong></div>
+          <button class="icon-button" id="soundButton" aria-label="切换音效" title="切换音效">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6.8 8.5H3v7h3.8L11 19V5Zm4 4.2c1.2 1.4 1.2 4.2 0 5.6m2.6-8.2c3 3 3 7.8 0 10.8"/></svg>
+          </button>
+          <button class="icon-button" id="helpButton" aria-label="查看玩法" title="查看玩法">?</button>
+        </div>
+      </header>
+
+      <section class="status-ribbon" aria-label="房间状态">
+        <div class="live-pill"><i></i><span id="phaseLabel">等待选手准备</span></div>
+        <p id="roomHint">前两位点击准备的玩家进入比赛，其他人自动观战</p>
+        <div class="audience-pill"><span class="eye" aria-hidden="true">◉</span><strong id="viewerCount">0</strong> 人观战</div>
+      </section>
+
+      <section class="arena-grid">
+        <article class="player-panel player-one" id="playerPanel0">
+          <header class="player-card">
+            <div class="player-identity">
+              <div class="avatar avatar-black" aria-hidden="true"></div>
+              <div>
+                <div class="player-kicker">选手 1 · 黑兔</div>
+                <h2 id="playerName0">等待加入</h2>
+              </div>
+            </div>
+            <div class="player-status"><i id="statusDot0"></i><span id="playerStatus0">未准备</span></div>
+            <div class="score"><span>得分</span><strong id="score0">0</strong><em>分</em></div>
+          </header>
+          <div class="board-frame">
+            <div class="board-topline"><span>满月盘</span><span id="shift0">10 秒后月饼下移</span></div>
+            <canvas id="board0" width="600" height="420" aria-label="选手一泡泡龙棋盘"></canvas>
+            <div class="danger-line"><span>警戒线</span></div>
+            <div class="board-lock" id="lock0"><span class="lock-moon">☾</span><strong>等待选手</strong><small>点击下方“加入并准备”占领席位</small></div>
+          </div>
+        </article>
+
+        <div class="versus" aria-hidden="true"><span>VS</span></div>
+
+        <article class="player-panel player-two" id="playerPanel1">
+          <header class="player-card">
+            <div class="player-identity">
+              <div class="avatar avatar-white" aria-hidden="true"></div>
+              <div>
+                <div class="player-kicker">选手 2 · 白兔</div>
+                <h2 id="playerName1">等待加入</h2>
+              </div>
+            </div>
+            <div class="player-status"><i id="statusDot1"></i><span id="playerStatus1">未准备</span></div>
+            <div class="score"><span>得分</span><strong id="score1">0</strong><em>分</em></div>
+          </header>
+          <div class="board-frame">
+            <div class="board-topline"><span>望月盘</span><span id="shift1">10 秒后月饼下移</span></div>
+            <canvas id="board1" width="600" height="420" aria-label="选手二泡泡龙棋盘"></canvas>
+            <div class="danger-line"><span>警戒线</span></div>
+            <div class="board-lock" id="lock1"><span class="lock-moon">☾</span><strong>等待选手</strong><small>点击下方“加入并准备”占领席位</small></div>
+          </div>
+        </article>
+      </section>
+
+      <footer class="control-dock">
+        <div class="role-summary">
+          <div class="mini-avatar" id="roleAvatar">观</div>
+          <div><span>你的身份</span><strong id="roleLabel">观众</strong></div>
+        </div>
+        <div class="dock-message" id="dockMessage">先准备的两位玩家可以操作发射器</div>
+        <div class="dock-actions">
+          <button class="ghost-button" id="opponentButton">打开对手窗口</button>
+          <button class="ready-button" id="readyButton"><span>加入并准备</span><i aria-hidden="true">→</i></button>
+        </div>
+      </footer>
+    </main>
+
+    <dialog id="helpDialog">
+      <button class="dialog-close" id="closeHelp" aria-label="关闭">×</button>
+      <div class="dialog-moon">月</div>
+      <h2>泡泡擂台玩法</h2>
+      <div class="rule-grid">
+        <div><b>01</b><p><strong>瞄准发射</strong><span>移动指针调整方向，点击棋盘发射月饼。</span></p></div>
+        <div><b>02</b><p><strong>三枚消除</strong><span>连接至少三枚同口味月饼，连同失去支撑的月饼一起掉落。</span></p></div>
+        <div><b>03</b><p><strong>一分钟竞速</strong><span>每掉落一枚得 1 分，结束时分数高者获胜。</span></p></div>
+        <div><b>04</b><p><strong>月潮下移</strong><span>每 10 秒全盘下移，并从最上方刷新一层。</span></p></div>
+      </div>
+      <button class="ready-button dialog-confirm" id="confirmHelp">明白了</button>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js" defer></script>
+    <script src="./peer-transport.js" defer></script>
+    <script src="./game.js" defer></script>
+  </body>
+</html>
