@@ -560,7 +560,7 @@
       const untilShift = 10 - (Math.floor(elapsed) % 10);
       [0,1].forEach((slot) => {
         const frozen = room.frozen?.[slot] || games[slot].frozen;
-        el(`shift${slot}`).textContent = frozen ? "已触线 · 棋盘暂停" : `${untilShift} 秒后月饼下移`;
+        el(`shift${slot}`).textContent = frozen ? "已触线 · 棋盘暂停" : (elapsed >= 50 ? "已完成 5 次下移" : `${untilShift} 秒后月饼下移`);
         const crossed = elapsed > 0 && left > 0 ? games[slot].syncRows(elapsed) : false;
         if (crossed && slot === currentRole) freezeBoard(slot);
       });
