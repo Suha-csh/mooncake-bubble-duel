@@ -99,7 +99,7 @@ h1 { font-size: clamp(1.15rem, 2vw, 1.55rem); margin: 0; letter-spacing: .08em; 
 .board-frame::before { content: ""; position: absolute; inset: 42px 9px 9px; border-radius: 14px; background: radial-gradient(circle at 50% 18%, rgba(116,75,163,.17), transparent 42%), linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: auto, 32px 32px, 32px 32px; }
 .board-topline { height: 33px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; color: var(--gold-soft); font-size: .7rem; letter-spacing: .07em; }
 .board-topline span:last-child { color: var(--muted); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-canvas { position: relative; z-index: 1; display: block; width: 100%; height: clamp(360px, calc(100dvh - 352px), 600px); border-radius: 14px; touch-action: none; cursor: crosshair; }
+canvas { position: relative; z-index: 1; display: block; width: 100%; height: clamp(340px, calc(100dvh - 372px), 600px); border-radius: 14px; touch-action: none; cursor: crosshair; }
 .danger-line { position: absolute; z-index: 2; left: 18px; right: 18px; top: 72%; border-top: 1px dashed rgba(232,102,88,.55); pointer-events: none; }
 .danger-line span { position: absolute; right: 0; top: -16px; color: rgba(255,144,129,.7); font-size: .58rem; letter-spacing: .1em; }
 .board-lock { position: absolute; z-index: 4; inset: 42px 9px 9px; display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; border-radius: 14px; background: rgba(9,6,25,.67); backdrop-filter: blur(3px); transition: opacity .3s, visibility .3s; }
