@@ -118,6 +118,7 @@
       this.pitch = 44;
       this.rowHeight = 38;
       this.top = 26;
+      this.fitCanvas();
       this.shooter = { x: this.canvas.width / 2, y: this.canvas.height - 50 };
       this.aim = -Math.PI / 2;
       this.balls = [];
@@ -130,7 +131,19 @@
       this.rng = Math.random;
       this.canvas.addEventListener("pointermove", (event) => this.point(event, false));
       this.canvas.addEventListener("pointerdown", (event) => this.point(event, true));
+      window.addEventListener("resize", () => this.fitCanvas());
       this.reset(82 + slot, "preview");
+    }
+
+    fitCanvas() {
+      const rect = this.canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const nextHeight = Math.max(360, Math.min(640, Math.round(this.canvas.width * rect.height / rect.width)));
+      if (this.canvas.height !== nextHeight) this.canvas.height = nextHeight;
+      if (this.shooter) {
+        this.shooter.x = this.canvas.width / 2;
+        this.shooter.y = this.canvas.height - 50;
+      }
     }
 
     reset(seed, roundId) {
