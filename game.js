@@ -118,7 +118,7 @@
       this.pitch = 44;
       this.rowHeight = 38;
       this.top = 26;
-      this.shooter = { x: 300, y: 370 };
+      this.shooter = { x: this.canvas.width / 2, y: this.canvas.height - 50 };
       this.aim = -Math.PI / 2;
       this.balls = [];
       this.queue = [0, 1, 2, 3];
@@ -212,7 +212,7 @@
         particle.rotation += particle.spin * dt;
         particle.alpha -= dt * .8;
       });
-      this.particles = this.particles.filter((particle) => particle.alpha > 0 && particle.y < 650);
+      this.particles = this.particles.filter((particle) => particle.alpha > 0 && particle.y < this.canvas.height + 120);
     }
 
     addRow() {
@@ -335,7 +335,7 @@
       const sh = sprite.naturalHeight / 2;
       const sx = (this.slot === 0 ? 2 : 3) * sw;
       ctx.save(); ctx.globalAlpha = .94;
-      ctx.drawImage(sprite, sx, sh, sw, sh, 175, 326, 84, 84);
+      ctx.drawImage(sprite, sx, sh, sw, sh, 175, this.canvas.height - 94, 84, 84);
       ctx.restore();
     }
 
@@ -344,7 +344,7 @@
       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
       ctx.save();
       ctx.strokeStyle = "rgba(255,230,176,.06)"; ctx.lineWidth = 1;
-      for (let x = 24; x < this.canvas.width; x += 44) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,325); ctx.stroke(); }
+      for (let x = 24; x < this.canvas.width; x += 44) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,this.canvas.height - 95); ctx.stroke(); }
       ctx.restore();
 
       this.balls.forEach((ball) => {
@@ -369,9 +369,10 @@
       this.drawRabbit();
 
       ctx.save(); ctx.fillStyle = "rgba(255,255,255,.05)"; ctx.strokeStyle = "rgba(255,220,150,.15)";
-      ctx.beginPath(); ctx.roundRect(380, 331, 210, 79, 17); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "rgba(255,225,170,.72)"; ctx.font = "600 10px system-ui"; ctx.fillText("随后登场", 394, 348);
-      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 427 + (index - 1) * 60, 380, 38));
+      const queueTop = this.canvas.height - 89;
+      ctx.beginPath(); ctx.roundRect(380, queueTop, 210, 79, 17); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(255,225,170,.72)"; ctx.font = "600 10px system-ui"; ctx.fillText("随后登场", 394, queueTop + 17);
+      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 427 + (index - 1) * 60, queueTop + 49, 38));
       ctx.restore();
     }
   }
