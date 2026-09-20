@@ -7,9 +7,11 @@
   const clientStorageKey = `moon-rabbit-client-${tabKey}`;
   const ROUND_SECONDS = 60;
   const STALE_MS = 9000;
+  const INITIAL_ROWS = 5;
+  const BALL_SIZE = 38;
   const COLORS = ["#e7aa45", "#d96757", "#789b4f", "#8a5598", "#ef9d32", "#70402d"];
   const sprite = new Image();
-  sprite.src = "./assets/mooncake-rabbits.png";
+  sprite.src = "./assets/mooncake-rabbits.png?v=air1";
   const clientId = sessionStorage.getItem(clientStorageKey) || `${Date.now().toString(36)}-${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
   sessionStorage.setItem(clientStorageKey, clientId);
 
@@ -35,7 +37,7 @@
 
   function makeRoom() {
     return {
-      version: 4,
+      version: 5,
       phase: "lobby",
       players: [null, null],
       presence: {},
@@ -45,6 +47,8 @@
       scores: [0, 0],
       snapshots: [null, null],
       winner: null,
+      loser: null,
+      endReason: null,
       revision: 0,
       updatedAt: Date.now()
     };
@@ -53,7 +57,7 @@
   async function serverAction(action, payload = {}, options = {}) {
     try {
       const next = await roomTransport?.action(action, payload, { immediate: options.keepalive === true });
-      if (next?.version === 4 && next.revision >= room.revision) {
+      if (next?.version === 5 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -67,7 +71,7 @@
   async function refreshRoom() {
     try {
       const next = roomTransport?.current();
-      if (next?.version === 4 && next.revision >= room.revision) {
+      if (next?.version === 5 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -114,10 +118,10 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext("2d");
       this.slot = slot;
-      this.radius = 21;
-      this.pitch = 44;
-      this.rowHeight = 38;
-      this.top = 26;
+      this.radius = 18;
+      this.pitch = 40;
+      this.rowHeight = 33;
+      this.top = 23;
       this.fitCanvas();
       this.shooter = { x: this.canvas.width / 2, y: this.canvas.height - 50 };
       this.aim = -Math.PI / 2;
@@ -127,6 +131,7 @@
       this.particles = [];
       this.score = 0;
       this.shiftedRows = 0;
+      this.overflowed = false;
       this.roundId = null;
       this.rng = Math.random;
       this.canvas.addEventListener("pointermove", (event) => this.point(event, false));
@@ -150,10 +155,10 @@
       this.rng = hashSeed(seed, this.slot);
       this.roundId = roundId;
       this.balls = [];
-      for (let row = 0; row < 6; row++) {
+      for (let row = 0; row < INITIAL_ROWS; row++) {
         const count = this.cols(row);
         for (let col = 0; col < count; col++) {
-          if (row > 3 && this.rng() < .12) continue;
+          if (row === INITIAL_ROWS - 1 && this.rng() < .18) continue;
           this.balls.push({ row, col, type: this.nextType() });
         }
       }
@@ -162,12 +167,13 @@
       this.particles = [];
       this.score = 0;
       this.shiftedRows = 0;
+      this.overflowed = false;
       this.aim = -Math.PI / 2;
     }
 
     nextType() { return Math.floor(this.rng() * 6); }
-    cols(row) { return row % 2 ? 12 : 13; }
-    coord(row, col) { return { x: 24 + col * this.pitch + (row % 2 ? 22 : 0), y: this.top + row * this.rowHeight }; }
+    cols(row) { return row % 2 ? 13 : 14; }
+    coord(row, col) { return { x: 39 + col * this.pitch + (row % 2 ? 20 : 0), y: this.top + row * this.rowHeight }; }
     key(row, col) { return `${row}:${col}`; }
 
     point(event, shouldShoot) {
@@ -226,6 +232,24 @@
         particle.alpha -= dt * .8;
       });
       this.particles = this.particles.filter((particle) => particle.alpha > 0 && particle.y < this.canvas.height + 120);
+      if (!this.overflowed && this.isOverDangerLine()) {
+        this.overflowed = true;
+        return true;
+      }
+      return false;
+    }
+
+    dangerY() {
+      const line = this.canvas.parentElement?.querySelector(".danger-line");
+      const canvasRect = this.canvas.getBoundingClientRect();
+      const lineRect = line?.getBoundingClientRect();
+      if (!lineRect || !canvasRect.height) return this.canvas.height * .72;
+      return (lineRect.top - canvasRect.top) * this.canvas.height / canvasRect.height;
+    }
+
+    isOverDangerLine() {
+      const limit = this.dangerY();
+      return this.balls.some((ball) => this.coord(ball.row, ball.col).y + this.radius >= limit);
     }
 
     addRow() {
@@ -313,7 +337,7 @@
         roundId: this.roundId, score: this.score, shiftedRows: this.shiftedRows,
         balls: this.balls.map((ball) => ({ row: ball.row, col: ball.col, type: ball.type })),
         queue: [...this.queue], shot: this.shot ? { ...this.shot } : null,
-        aim: this.aim, updatedAt: Date.now()
+        aim: this.aim, overflowed: this.overflowed, updatedAt: Date.now()
       };
     }
 
@@ -326,6 +350,7 @@
       this.queue = snapshot.queue || this.queue;
       this.shot = snapshot.shot || null;
       this.aim = snapshot.aim ?? this.aim;
+      this.overflowed = Boolean(snapshot.overflowed);
     }
 
     drawSprite(type, x, y, size, rotation = 0, alpha = 1) {
@@ -362,10 +387,10 @@
 
       this.balls.forEach((ball) => {
         const p = this.coord(ball.row, ball.col);
-        this.drawSprite(ball.type, p.x, p.y, 45);
+        this.drawSprite(ball.type, p.x, p.y, BALL_SIZE);
       });
-      this.particles.forEach((particle) => this.drawSprite(particle.type, particle.x, particle.y, 42, particle.rotation, Math.max(0, particle.alpha)));
-      if (this.shot) this.drawSprite(this.shot.type, this.shot.x, this.shot.y, 45);
+      this.particles.forEach((particle) => this.drawSprite(particle.type, particle.x, particle.y, 36, particle.rotation, Math.max(0, particle.alpha)));
+      if (this.shot) this.drawSprite(this.shot.type, this.shot.x, this.shot.y, BALL_SIZE);
 
       const sx = this.shooter.x, sy = this.shooter.y;
       const lineLength = 112;
@@ -378,14 +403,14 @@
       const gradient = ctx.createLinearGradient(-8,-34,8,10); gradient.addColorStop(0,"#f2b84e"); gradient.addColorStop(1,"#713623");
       ctx.fillStyle = gradient; ctx.strokeStyle = "#ffdc8b"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.roundRect(-9,-39,18,42,8); ctx.fill(); ctx.stroke(); ctx.restore();
-      this.drawSprite(this.queue[0], sx, sy - 26, 45);
+      this.drawSprite(this.queue[0], sx, sy - 26, BALL_SIZE);
       this.drawRabbit();
 
       ctx.save(); ctx.fillStyle = "rgba(255,255,255,.05)"; ctx.strokeStyle = "rgba(255,220,150,.15)";
       const queueTop = this.canvas.height - 89;
       ctx.beginPath(); ctx.roundRect(380, queueTop, 210, 79, 17); ctx.fill(); ctx.stroke();
       ctx.fillStyle = "rgba(255,225,170,.72)"; ctx.font = "600 10px system-ui"; ctx.fillText("随后登场", 394, queueTop + 17);
-      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 427 + (index - 1) * 60, queueTop + 49, 38));
+      [1,2,3].forEach((index) => this.drawSprite(this.queue[index], 427 + (index - 1) * 60, queueTop + 49, 35));
       ctx.restore();
     }
   }
@@ -435,17 +460,24 @@
       ui.phaseLabel.textContent = "擂台对战中";
       ui.roomHint.textContent = currentRole < 0 ? "观战模式 · 棋盘状态实时同步" : "瞄准棋盘并点击，连接三枚同口味月饼";
     } else {
-      const winnerText = room.winner === -1 ? "本局平局" : `选手 ${room.winner + 1} 获胜`;
-      ui.phaseLabel.textContent = winnerText;
-      ui.roomHint.textContent = `最终比分 ${room.scores[0]} : ${room.scores[1]}`;
-      ui.timer.textContent = "00:00"; ui.clockProgress.style.width = "0%";
+      if (room.endReason === "overflow" && Number.isInteger(room.loser)) {
+        ui.phaseLabel.textContent = `选手 ${room.loser + 1} 月饼越线`;
+        ui.roomHint.textContent = `选手 ${room.winner + 1} 获胜 · 最终比分 ${room.scores[0]} : ${room.scores[1]}`;
+        ui.timer.textContent = "结束";
+      } else {
+        const winnerText = room.winner === -1 ? "本局平局" : `选手 ${room.winner + 1} 获胜`;
+        ui.phaseLabel.textContent = winnerText;
+        ui.roomHint.textContent = `最终比分 ${room.scores[0]} : ${room.scores[1]}`;
+        ui.timer.textContent = "00:00";
+      }
+      ui.clockProgress.style.width = "0%";
     }
 
     if (currentRole >= 0) {
       const player = room.players[currentRole];
       ui.roleLabel.textContent = `选手 ${currentRole + 1} · ${currentRole ? "白兔" : "黑兔"}`;
       ui.roleAvatar.textContent = "";
-      ui.roleAvatar.style.backgroundImage = "url('./assets/mooncake-rabbits.png')";
+      ui.roleAvatar.style.backgroundImage = "url('./assets/mooncake-rabbits.png?v=air1')";
       ui.roleAvatar.style.backgroundSize = "400% 200%";
       ui.roleAvatar.style.backgroundPosition = currentRole ? "100% 100%" : "66.666% 100%";
       if (room.phase === "lobby") {
@@ -478,10 +510,15 @@
     });
   }
 
-  async function finishRound() {
+  async function finishRound(loser = null) {
     if (room.phase !== "playing") return;
-    const next = await serverAction("finish", {}, { silent: true });
-    if (next?.phase === "finished") sound("end");
+    const overflow = Number.isInteger(loser);
+    const payload = overflow ? { snapshot: games[loser].snapshot() } : {};
+    const next = await serverAction(overflow ? "overflow" : "finish", payload, { silent: true });
+    if (next?.phase === "finished") {
+      sound("end");
+      if (overflow) announce("月饼越过警戒线，本局结束");
+    }
   }
 
   function publishGame(now) {
@@ -502,7 +539,13 @@
       ui.clockProgress.style.width = `${left / ROUND_SECONDS * 100}%`;
       const untilShift = 10 - (Math.floor(elapsed) % 10);
       [0,1].forEach((slot) => el(`shift${slot}`).textContent = `${untilShift} 秒后月饼下移`);
-      if (currentRole >= 0 && elapsed > 0 && left > 0) games[currentRole].update(dt, elapsed);
+      if (currentRole >= 0 && elapsed > 0 && left > 0) {
+        const overflowed = games[currentRole].update(dt, elapsed);
+        if (overflowed && !finishRequested) {
+          finishRequested = true;
+          finishRound(currentRole);
+        }
+      }
       publishGame(now);
       if (left <= 0 && !finishRequested) { finishRequested = true; finishRound(); }
     } else {
@@ -558,7 +601,7 @@
     roomCode,
     clientId,
     onState(next) {
-      if (next?.version === 4 && next.revision >= room.revision) {
+      if (next?.version === 5 && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }

@@ -83,7 +83,7 @@ h1 { font-size: clamp(1.15rem, 2vw, 1.55rem); margin: 0; letter-spacing: .08em; 
 .player-panel.is-local .player-card, .player-panel.is-local .board-frame { border-color: rgba(255, 211, 117, .58); box-shadow: 0 0 0 1px rgba(255, 204, 107, .08), 0 22px 60px rgba(0,0,0,.28); }
 .player-card { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 18px; padding: 10px 15px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(130deg, rgba(46,29,79,.9), rgba(23,14,50,.88)); }
 .player-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
-.avatar { width: 52px; height: 52px; flex: 0 0 auto; background-image: url("./assets/mooncake-rabbits.png"); background-size: 400% 200%; background-repeat: no-repeat; filter: drop-shadow(0 5px 9px rgba(0,0,0,.35)); }
+.avatar { width: 52px; height: 52px; flex: 0 0 auto; background-image: url("./assets/mooncake-rabbits.png?v=air1"); background-size: 400% 200%; background-repeat: no-repeat; filter: drop-shadow(0 5px 9px rgba(0,0,0,.35)); }
 .avatar-black { background-position: 66.666% 100%; }
 .avatar-white { background-position: 100% 100%; }
 .player-kicker { color: var(--gold-soft); font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; }

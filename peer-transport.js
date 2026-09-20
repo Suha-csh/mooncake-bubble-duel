@@ -6,7 +6,7 @@
 
   function freshRoom() {
     return {
-      version: 4,
+      version: 5,
       phase: "lobby",
       players: [null, null],
       presence: {},
@@ -16,6 +16,8 @@
       scores: [0, 0],
       snapshots: [null, null],
       winner: null,
+      loser: null,
+      endReason: null,
       revision: 0,
       updatedAt: Date.now()
     };
@@ -55,6 +57,7 @@
         type: Math.max(0, Math.min(5, Number(value.shot.type) || 0))
       } : null,
       aim: Number(value.aim) || -Math.PI / 2,
+      overflowed: Boolean(value.overflowed),
       updatedAt: Date.now()
     };
   }
@@ -75,6 +78,8 @@
         state.phase = "lobby";
         state.startedAt = null;
         state.winner = null;
+        state.loser = null;
+        state.endReason = null;
         state.scores = [0, 0];
         state.snapshots = [null, null];
         state.players = state.players.map((player) => player ? { ...player, ready: false } : null);
@@ -102,6 +107,8 @@
         state.scores = [0, 0];
         state.snapshots = [null, null];
         state.winner = null;
+        state.loser = null;
+        state.endReason = null;
       }
     } else if (action === "snapshot" && state.phase === "playing") {
       const slot = state.players.findIndex((player) => player?.id === clientId);
@@ -109,6 +116,23 @@
       if (slot >= 0 && snapshot) {
         state.snapshots[slot] = snapshot;
         state.scores[slot] = snapshot.score;
+      }
+    } else if (action === "overflow" && state.phase === "playing") {
+      const slot = state.players.findIndex((player) => player?.id === clientId);
+      const snapshot = safeSnapshot(body.snapshot, state.roundId);
+      if (slot >= 0 && now >= Number(state.startedAt || now)) {
+        if (snapshot) {
+          state.snapshots[slot] = snapshot;
+          state.scores[slot] = snapshot.score;
+        }
+        state.phase = "finished";
+        state.scores = [
+          state.snapshots?.[0]?.score || state.scores[0] || 0,
+          state.snapshots?.[1]?.score || state.scores[1] || 0
+        ];
+        state.loser = slot;
+        state.winner = slot === 0 ? 1 : 0;
+        state.endReason = "overflow";
       }
     } else if (action === "finish" && state.phase === "playing") {
       if (now - Number(state.startedAt || now) >= ROUND_MS - 250) {
@@ -118,6 +142,8 @@
           state.snapshots?.[1]?.score || state.scores[1] || 0
         ];
         state.winner = state.scores[0] === state.scores[1] ? -1 : (state.scores[0] > state.scores[1] ? 0 : 1);
+        state.loser = null;
+        state.endReason = "time";
       }
     } else if (action === "leave") {
       delete state.presence[clientId];
@@ -136,7 +162,7 @@
       this.clientId = clientId;
       this.onState = onState;
       this.onStatus = onStatus;
-      this.hostId = `moon-rabbit-v4-${roomCode.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+      this.hostId = `moon-rabbit-v5-${roomCode.toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
       this.latest = freshRoom();
       this.hostState = this.latest;
       this.peer = null;
@@ -269,7 +295,7 @@
     }
 
     receive(message) {
-      if (message?.kind !== "state" || message.state?.version !== 4) return;
+      if (message?.kind !== "state" || message.state?.version !== 5) return;
       if (Number(message.state.revision || 0) >= Number(this.latest.revision || 0)) {
         this.latest = message.state;
         this.emitState();
