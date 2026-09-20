@@ -6,6 +6,7 @@
   const tabKey = params.get("tab") || "root";
   const clientStorageKey = `moon-rabbit-client-${tabKey}`;
   const ROUND_SECONDS = 60;
+  const ROOM_VERSION = 8;
   const STALE_MS = 9000;
   const INITIAL_ROWS = 5;
   const BALL_SIZE = 31;
@@ -37,7 +38,7 @@
 
   function makeRoom() {
     return {
-      version: 6,
+      version: ROOM_VERSION,
       phase: "lobby",
       players: [null, null],
       presence: {},
@@ -58,7 +59,7 @@
   async function serverAction(action, payload = {}, options = {}) {
     try {
       const next = await roomTransport?.action(action, payload, { immediate: options.keepalive === true });
-      if (next?.version === 6 && next.revision >= room.revision) {
+      if (next?.version === ROOM_VERSION && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -72,7 +73,7 @@
   async function refreshRoom() {
     try {
       const next = roomTransport?.current();
-      if (next?.version === 6 && next.revision >= room.revision) {
+      if (next?.version === ROOM_VERSION && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
@@ -133,6 +134,9 @@
       this.score = 0;
       this.shiftedRows = 0;
       this.frozen = false;
+      this.snapshotSequence = 0;
+      this.lastAppliedSequence = 0;
+      this.lastAppliedUpdatedAt = 0;
       this.roundId = null;
       this.rng = Math.random;
       this.canvas.addEventListener("pointermove", (event) => this.point(event, false));
@@ -157,6 +161,7 @@
       this.seed = seed;
       this.roundId = roundId;
       this.balls = [];
+      this.shiftedRows = 0;
       for (let row = 0; row < INITIAL_ROWS; row++) {
         const count = this.cols(row);
         for (let col = 0; col < count; col++) {
@@ -168,14 +173,17 @@
       this.shot = null;
       this.particles = [];
       this.score = 0;
-      this.shiftedRows = 0;
       this.frozen = false;
+      this.snapshotSequence = 0;
+      this.lastAppliedSequence = 0;
+      this.lastAppliedUpdatedAt = 0;
       this.aim = -Math.PI / 2;
     }
 
     nextType() { return Math.floor(this.rng() * 6); }
-    cols(row) { return row % 2 ? 16 : 17; }
-    coord(row, col) { return { x: 28 + col * this.pitch + (row % 2 ? 17 : 0), y: this.top + row * this.rowHeight }; }
+    rowParity(row) { return ((row - this.shiftedRows) % 2 + 2) % 2; }
+    cols(row) { return this.rowParity(row) ? 16 : 17; }
+    coord(row, col) { return { x: 28 + col * this.pitch + (this.rowParity(row) ? 17 : 0), y: this.top + row * this.rowHeight }; }
     key(row, col) { return `${row}:${col}`; }
 
     point(event, shouldShoot) {
@@ -210,7 +218,6 @@
       while (this.shiftedRows < expectedShifts && this.shiftedRows < 5) {
         const shiftNumber = this.shiftedRows + 1;
         this.addRow(shiftNumber);
-        this.shiftedRows = shiftNumber;
       }
       if (this.isOverDangerLine()) {
         this.frozen = true;
@@ -266,6 +273,7 @@
 
     addRow(shiftNumber) {
       this.balls.forEach((ball) => { ball.row += 1; });
+      this.shiftedRows = shiftNumber;
       const rowRng = hashSeed((this.seed ^ Math.imul(shiftNumber, 0x45d9f3b)) >>> 0, this.slot + 8);
       for (let col = 0; col < this.cols(0); col++) this.balls.push({ row: 0, col, type: Math.floor(rowRng() * 6) });
     }
@@ -297,7 +305,7 @@
     }
 
     neighbors(ball) {
-      const even = ball.row % 2 === 0;
+      const even = this.rowParity(ball.row) === 0;
       const deltas = even
         ? [[-1,0],[1,0],[-1,-1],[0,-1],[-1,1],[0,1]]
         : [[-1,0],[1,0],[0,-1],[1,-1],[0,1],[1,1]];
@@ -346,22 +354,37 @@
     }
 
     snapshot() {
+      this.snapshotSequence += 1;
       return {
         roundId: this.roundId, score: this.score, shiftedRows: this.shiftedRows,
         balls: this.balls.map((ball) => ({ row: ball.row, col: ball.col, type: ball.type })),
         queue: [...this.queue], shot: this.shot ? { ...this.shot } : null,
-        aim: this.aim, frozen: this.frozen, updatedAt: Date.now()
+        aim: this.aim, frozen: this.frozen, sequence: this.snapshotSequence, updatedAt: Date.now()
       };
     }
 
-    applySnapshot(snapshot) {
+    applySnapshot(snapshot, expectedShifts = 0) {
       if (!snapshot || snapshot.roundId !== room.roundId || this.slot === currentRole) return;
+      const sequence = Math.max(0, Number(snapshot.sequence) || 0);
+      const updatedAt = Math.max(0, Number(snapshot.updatedAt) || 0);
+      const isNewer = updatedAt > this.lastAppliedUpdatedAt
+        || (updatedAt === this.lastAppliedUpdatedAt && sequence > this.lastAppliedSequence);
+      if (!isNewer) return;
+      this.lastAppliedSequence = sequence;
+      this.lastAppliedUpdatedAt = updatedAt;
+      const snapshotShifts = Math.max(0, Math.min(5, Number(snapshot.shiftedRows) || 0));
+      const minimumShifts = Math.max(this.shiftedRows, expectedShifts);
+
+      // A delayed peer snapshot must never rewind a board that the room clock
+      // has already advanced. The owner will publish a caught-up snapshot next.
+      if (snapshotShifts < minimumShifts) return;
+
       this.roundId = snapshot.roundId;
       this.score = snapshot.score || 0;
-      this.shiftedRows = snapshot.shiftedRows || 0;
-      this.balls = snapshot.balls || [];
-      this.queue = snapshot.queue || this.queue;
-      this.shot = snapshot.shot || null;
+      this.shiftedRows = snapshotShifts;
+      this.balls = (snapshot.balls || []).map((ball) => ({ ...ball }));
+      this.queue = snapshot.queue ? [...snapshot.queue] : this.queue;
+      this.shot = snapshot.shot ? { ...snapshot.shot } : null;
       this.aim = snapshot.aim ?? this.aim;
       this.frozen = Boolean(snapshot.frozen);
     }
@@ -465,7 +488,7 @@
       lock.querySelector(".lock-moon").textContent = frozen ? "Ⅱ" : "☾";
       if (frozen) {
         lock.querySelector("strong").textContent = "已触线，棋盘暂停";
-        lock.querySelector("small").textContent = "倒计时继续，结束后按双方得分结算";
+        lock.querySelector("small").textContent = "另一方继续比赛；双方均触线时立即结算";
       } else if (!showBoard) {
         lock.querySelector("strong").textContent = player ? (player.ready ? "已准备，等待对手" : "等待准备") : "等待选手";
         lock.querySelector("small").textContent = player ? "两位选手都准备后，倒计时自动开始" : "点击下方“加入并准备”占领席位";
@@ -478,13 +501,13 @@
       ui.timer.textContent = "01:00"; ui.clockProgress.style.width = "100%";
     } else if (room.phase === "playing") {
       const frozenSlots = [0, 1].filter((slot) => room.frozen?.[slot]);
-      ui.phaseLabel.textContent = frozenSlots.length ? "触线暂停中" : "擂台对战中";
+      ui.phaseLabel.textContent = frozenSlots.length ? "一方已触线" : "擂台对战中";
       ui.roomHint.textContent = frozenSlots.length
-        ? `选手 ${frozenSlots.map((slot) => slot + 1).join("、")} 已暂停 · 倒计时继续，结束后按得分结算`
+        ? `选手 ${frozenSlots.map((slot) => slot + 1).join("、")} 已暂停 · 另一方继续，双方均触线时立即结算`
         : (currentRole < 0 ? "观战模式 · 棋盘状态实时同步" : "瞄准棋盘并点击，连接三枚同口味月饼");
     } else {
       const winnerText = room.winner === -1 ? "本局平局" : `选手 ${room.winner + 1} 获胜`;
-      ui.phaseLabel.textContent = winnerText;
+      ui.phaseLabel.textContent = room.endReason === "both-crossed" ? `双方触线 · ${winnerText}` : winnerText;
       ui.roomHint.textContent = `最终比分 ${room.scores[0]} : ${room.scores[1]}`;
       ui.timer.textContent = "00:00";
       ui.clockProgress.style.width = "0%";
@@ -505,8 +528,8 @@
       } else if (room.phase === "playing") {
         ui.readyButton.disabled = true; ui.readyButton.classList.remove("is-ready");
         const frozen = Boolean(room.frozen?.[currentRole]);
-        ui.readyButton.querySelector("span").textContent = frozen ? "等待结算" : "比赛进行中";
-        ui.dockMessage.textContent = frozen ? "棋盘已暂停，倒计时结束后按得分结算" : "移动指针瞄准，点击发射月饼";
+        ui.readyButton.querySelector("span").textContent = frozen ? "已触线" : "比赛进行中";
+        ui.dockMessage.textContent = frozen ? "你的棋盘已暂停；对手可继续，双方均触线时立即结算" : "移动指针瞄准，点击发射月饼";
       } else {
         ui.readyButton.disabled = false; ui.readyButton.classList.remove("is-ready");
         ui.readyButton.querySelector("span").textContent = "再来一局";
@@ -522,9 +545,12 @@
       ui.dockMessage.textContent = full ? "两个比赛席位已满，你可以实时观看双方状态" : "先准备的两位玩家可以操作发射器";
     }
 
+    const expectedShifts = room.phase === "playing" && room.startedAt
+      ? Math.max(0, Math.min(5, Math.floor((Date.now() - room.startedAt) / 10_000)))
+      : 0;
     games.forEach((game, slot) => {
       if (room.phase === "playing" && room.roundId && game.roundId !== room.roundId) game.reset(room.seed, room.roundId);
-      if (slot !== currentRole) game.applySnapshot(room.snapshots?.[slot]);
+      if (slot !== currentRole) game.applySnapshot(room.snapshots?.[slot], expectedShifts);
       if (room.phase === "playing" && room.frozen?.[slot]) game.frozen = true;
     });
   }
@@ -532,7 +558,12 @@
   async function freezeBoard(slot) {
     if (room.phase !== "playing") return;
     const next = await serverAction("freeze", { snapshot: games[slot].snapshot() }, { silent: true });
-    if (next?.frozen?.[slot]) announce("月饼触线，棋盘暂停；倒计时结束后按得分结算");
+    if (next?.phase === "finished" && next.endReason === "both-crossed") {
+      sound("end");
+      announce("双方均已触线，比赛立即结束并按当前比分结算");
+    } else if (next?.frozen?.[slot]) {
+      announce("月饼触线，你的棋盘已暂停；对手仍可继续");
+    }
   }
 
   async function finishRound() {
@@ -623,7 +654,7 @@
     roomCode,
     clientId,
     onState(next) {
-      if (next?.version === 6 && next.revision >= room.revision) {
+      if (next?.version === ROOM_VERSION && next.revision >= room.revision) {
         room = next;
         renderRoom();
       }
